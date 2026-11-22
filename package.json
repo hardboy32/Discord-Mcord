@@ -6,7 +6,7 @@
   "main": "combined.js",
   "scripts": {
     "start": "node combined.js",
-    "check": "node --check combined.js && node --check start.js && node --check index.js && node --check dashboard.js && node --check modules.js && node --check community.js"
+    "check": "node --check combined.js && node --check start.js && node --check index.js && node --check dashboard.js && node --check modules.js && node --check community.js && node --check runtime-control.js"
   },
   "engines": {
     "node": ">=22.12.0 <23"
