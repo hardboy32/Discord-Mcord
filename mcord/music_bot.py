@@ -559,8 +559,110 @@ class GuildPlayer:
             "All live Piped instances failed: " + " | ".join(errors[-8:])
         )
 
+    async def _resolve_with_shared_lavalink(self, query):
+        """Resolve a request through the same Lavalink node used by the Node bot."""
+        base = os.getenv("LAVALINK_URL", "http://127.0.0.1:2333").rstrip("/")
+        password = os.getenv("LAVALINK_PASSWORD", "").strip()
+        if not password:
+            raise RuntimeError("Shared Lavalink password is not available.")
+
+        raw_query = str(query or "").strip()
+        if not raw_query:
+            raise RuntimeError("Empty music query.")
+
+        identifiers = (
+            [raw_query]
+            if raw_query.startswith(("http://", "https://"))
+            else ["ytsearch:" + raw_query, "scsearch:" + raw_query]
+        )
+
+        def resolve(identifier):
+            url = base + "/v4/loadtracks?identifier=" + urllib.parse.quote(identifier, safe="")
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "Authorization": password,
+                    "User-Agent": "Discord-Mcord-SharedMusic/1.0",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=18) as response:
+                return json.loads(response.read().decode("utf-8", "replace"))
+
+        errors = []
+        for identifier in identifiers:
+            try:
+                payload = await asyncio.to_thread(resolve, identifier)
+                load_type = str(payload.get("loadType") or "").lower()
+                if load_type == "error":
+                    details = payload.get("data") or {}
+                    raise RuntimeError(str(details.get("message") or details)[:400])
+
+                data = payload.get("data")
+                if load_type == "track" and isinstance(data, dict):
+                    tracks = [data]
+                elif load_type in ("search", "playlist") and isinstance(data, list):
+                    tracks = data
+                else:
+                    tracks = []
+
+                for item in tracks:
+                    info = item.get("info") or {}
+                    uri = str(info.get("uri") or "").strip()
+                    if uri.startswith(("http://", "https://")):
+                        source = str(info.get("sourceName") or "").lower()
+                        log.info(
+                            "Shared Lavalink resolved Mcord request: source=%s title=%s",
+                            source or "unknown",
+                            info.get("title") or "Unknown",
+                        )
+                        return {
+                            "uri": uri,
+                            "title": str(info.get("title") or raw_query),
+                            "source": source,
+                        }
+            except Exception as exc:
+                errors.append(str(exc))
+                log.warning("Shared Lavalink resolution failed for %s: %s", identifier[:100], exc)
+
+        raise RuntimeError("Shared Lavalink could not resolve this request: " + " | ".join(errors[-2:]))
+
     async def download(self, query):
-        # SoundCloud is an independent fallback when YouTube access is restricted by the host network.
+        # Both bots now use the same Lavalink node and the same source selection
+        # order (YouTube first, then SoundCloud). Mcord still feeds the resolved
+        # media URL into its own LiveKit voice connection because Lavalink's
+        # native player can only transmit directly to Discord voice.
+        resolved = None
+        try:
+            resolved = await self._resolve_with_shared_lavalink(query)
+            source_url = resolved["uri"]
+            source_name = resolved["source"]
+            log.info(
+                "Mcord will download Lavalink-selected track: %s (%s)",
+                resolved["title"],
+                source_name or "unknown source",
+            )
+            if "soundcloud" in source_name:
+                try:
+                    track = await self._download_from_soundcloud(source_url)
+                    track.title = resolved["title"]
+                    track.query = query
+                    return track
+                except Exception as exc:
+                    log.warning("Lavalink-selected SoundCloud extraction failed: %s", exc)
+            if "youtube" in source_name:
+                try:
+                    track = await self._download_from_piped(source_url)
+                    track.title = resolved["title"]
+                    track.query = query
+                    return track
+                except Exception as exc:
+                    log.warning("Lavalink-selected YouTube/Piped extraction failed: %s", exc)
+            query = source_url
+        except Exception as exc:
+            log.warning("Using legacy Mcord source fallback because shared Lavalink resolution failed: %s", exc)
+
+        # Compatibility fallback: if Lavalink is temporarily unavailable, keep
+        # the previous Mcord extractors operational rather than losing music.
         try:
             return await self._download_from_soundcloud(query)
         except Exception as exc:
@@ -603,8 +705,6 @@ class GuildPlayer:
             except Exception:
                 log.exception("Could not decode YOUTUBE_COOKIES_B64.")
 
-        # Prefer an explicitly configured cookie file or Base64 value. If neither
-        # is supplied, use the cookie file committed under Config/ in this repo.
         if not cookies_file or not Path(cookies_file).is_file():
             bundled_cookies = (
                 Path(__file__).resolve().parent / "Config" / "youtube_cookies.txt"
@@ -653,13 +753,14 @@ class GuildPlayer:
                         duration = await self._media_duration(path)
                         if duration is not None:
                             self.temp_files.add(path)
-                            return Track(lines[-2], path, query=query)
+                            title = resolved["title"] if resolved else lines[-2]
+                            return Track(title, path, query=query)
 
             error = stderr.decode("utf-8", "replace").strip()
             raise RuntimeError(error[-1600:] or "unknown YouTube error")
         except Exception as exc:
             raise RuntimeError(
-                "پخش نشد. SoundCloud، Piped و YouTube مستقیم از این سرور پاسخ قابل‌استفاده ندادند. "
+                "پخش نشد. Lavalink، SoundCloud، Piped و YouTube مستقیم از این سرور پاسخ قابل‌استفاده ندادند. "
                 + str(exc)
             ) from exc
 
