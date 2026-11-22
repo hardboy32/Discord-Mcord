@@ -19,5 +19,7 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Check JavaScript syntax
         run: npm run check
+      - name: Check Python syntax
+        run: python -m py_compile mcord/*.py
       - name: Build Railway Docker image
         run: docker build --tag discord-lavalink-bot:ci .
