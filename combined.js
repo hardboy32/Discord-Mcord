@@ -3,6 +3,7 @@
 require('dotenv').config({ quiet: true });
 
 const { spawn } = require('node:child_process');
+const crypto = require('node:crypto');
 
 const required = ['DISCORD_TOKEN', 'MCORD_BOT_TOKEN'];
 const missing = required.filter(name => !String(process.env[name] || '').trim());
@@ -10,6 +11,14 @@ if (missing.length) {
   console.error('[Combined] Missing required Railway variables: ' + missing.join(', '));
   process.exit(1);
 }
+
+// One shared Lavalink credential is passed to both the Node bot and Mcord.
+// This lets Mcord resolve the same YouTube/SoundCloud catalogue through the
+// exact Lavalink instance used by the main Discord bot.
+if (!String(process.env.LAVALINK_PASSWORD || '').trim()) {
+  process.env.LAVALINK_PASSWORD = crypto.randomBytes(32).toString('hex');
+}
+process.env.LAVALINK_URL = process.env.LAVALINK_URL || 'http://127.0.0.1:2333';
 
 const children = new Map();
 let shuttingDown = false;
