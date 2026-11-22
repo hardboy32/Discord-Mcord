@@ -15,7 +15,7 @@ const children = new Map();
 let shuttingDown = false;
 let shutdownTimer = null;
 
-function launch(name, command, args) {
+function launch(name, command, args, childEnv = process.env) {
   const state = { child: null, restartTimer: null, stableTimer: null, delay: 3000 };
   children.set(name, state);
 
@@ -35,7 +35,7 @@ function launch(name, command, args) {
     console.log('[Combined] Starting ' + name + '.');
     const child = spawn(command, args, {
       cwd: '/app',
-      env: process.env,
+      env: childEnv,
       stdio: 'inherit',
     });
     state.child = child;
@@ -100,5 +100,11 @@ function shutdown(signal) {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-launch('Discord + Lavalink', 'node', ['start.js']);
-launch('Mcord', '/opt/venv/bin/python', ['mcord/run.py']);
+launch('Discord + Lavalink', 'node', ['start.js'], process.env);
+
+// The Python source project can also start a discord.py music bot if it sees
+// DISCORD_TOKEN. Keep that token exclusively in the Node.js Discord process.
+launch('Mcord', '/opt/venv/bin/python', ['mcord/run.py'], {
+  ...process.env,
+  DISCORD_TOKEN: '',
+});
