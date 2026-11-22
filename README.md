@@ -7,14 +7,14 @@ This repository combines the two source projects in a separate repository. The o
 
 ## How it runs
 
-Railway starts one container with `node combined.js`. The supervisor launches two independent stacks:
+Railway starts one container with `node combined.js`. The supervisor launches two independent stacks and watches the persistent runtime-control file so Mcord can be stopped or restarted from the dashboard without stopping Discord or Lavalink:
 
 1. `node start.js` — starts YouTube Cipher, Lavalink and the original Discord bot.
 2. `/opt/venv/bin/python mcord/run.py` — starts only the Mcord bot.
 
 The Python source can also start a Discord music bot when it receives `DISCORD_TOKEN`. The supervisor deliberately removes that variable from the Python process environment, so the Node.js application is the only process that logs into Discord. The Python process receives `MCORD_BOT_TOKEN` and connects to Mcord. Both processes share the same `LAVALINK_URL` and `LAVALINK_PASSWORD`. Mcord now asks this exact Lavalink node to resolve/search YouTube first and SoundCloud second, matching the main Discord bot's source order. It then downloads the selected media and sends it through Mcord's required LiveKit voice connection; Lavalink's native audio player cannot directly transmit into LiveKit. If Lavalink is temporarily unavailable, Mcord retains its previous extractor fallback so music does not stop entirely.
 
-If one stack exits unexpectedly, the supervisor retries that stack with a backoff without intentionally stopping the other. Use one Railway replica to avoid duplicate bot sessions.
+If one stack exits unexpectedly, the supervisor retries that stack with a backoff without intentionally stopping the other. Use one Railway replica to avoid duplicate bot sessions. The full dashboard stays available while the Discord gateway is switched off, and its Bot Control panel can bring Discord back. Mcord is independently stopped/restarted by the combined supervisor.
 
 ## Railway setup
 
