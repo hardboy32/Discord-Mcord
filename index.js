@@ -34,6 +34,7 @@ const AudioPlayerStatus = Object.freeze({
   Paused: 'paused',
 });
 const { startDashboard, getDashboardSettings, applySavedBotPresence, setBotActivity } = require('./dashboard');
+const { readRuntimeControl, writeRuntimeControl } = require('./runtime-control');
 const { attachCoreModules, getCoreCommands, handleCoreInteraction } = require('./modules');
 const { getCommunityCommands, handleCommunityInteraction, attachCommunityModules } = require('./community');
 const TOKEN = (process.env.DISCORD_TOKEN || '').trim();
@@ -2871,21 +2872,21 @@ function startManagedChannelTopicSync(readyClient) {
   logDebug('Managed channel topic sync started; configured channel guides refresh every minute.');
 }
 
-client.once(Events.ClientReady, async (readyClient) => {
+let readyInitializationComplete = false;
+client.on(Events.ClientReady, async (readyClient) => {
   logDebug('Runtime process ID:', process.pid);
   logDebug('Logged in as ' + readyClient.user.tag);
-  startDashboard(readyClient, playTrackFromDashboard, playSavedTrackFromDashboard, getDashboardMusicStatus, controlDashboardMusic, async (member) => sendWelcomeMessage(member, getDashboardSettings(member.guild.id).welcome), getRuntimeMonitoring);
-  startMusicRequestCleanupScheduler(readyClient);
-  startManagedChannelTopicSync(readyClient);
-  await initializeMusicRequestPanels(readyClient);
-  logDebug('AI providers configured: ' + [GEMINI_API_KEY ? 'Gemini (' + GEMINI_MODEL + ')' : null, GROQ_API_KEY ? 'Groq (' + GROQ_MODEL + ')' : null, CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN ? 'Cloudflare Workers AI (' + CLOUDFLARE_CHAT_MODEL + ')' : null].filter(Boolean).join(', ') + (GEMINI_API_KEY || GROQ_API_KEY || (CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) ? '.' : 'None. Add the required AI API variables in Railway Variables.'));
+  if (!readyInitializationComplete) {
+    readyInitializationComplete = true;
+    startMusicRequestCleanupScheduler(readyClient);
+    startManagedChannelTopicSync(readyClient);
+    await initializeMusicRequestPanels(readyClient);
+    logDebug('AI providers configured: ' + [GEMINI_API_KEY ? 'Gemini (' + GEMINI_MODEL + ')' : null, GROQ_API_KEY ? 'Groq (' + GROQ_MODEL + ')' : null, CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN ? 'Cloudflare Workers AI (' + CLOUDFLARE_CHAT_MODEL + ')' : null].filter(Boolean).join(', ') + (GEMINI_API_KEY || GROQ_API_KEY || (CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) ? '.' : 'None. Add the required AI API variables in Railway Variables.'));
+  }
   applySavedBotPresence(readyClient);
   logDebug('Saved bot status and activity restored.');
-  try {
-    await registerCommands();
-  } catch (error) {
-    console.error('Slash command registration failed:', error.stack || error);
-  }
+  try { await registerCommands(); }
+  catch (error) { console.error('Slash command registration failed:', error.stack || error); }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -3229,7 +3230,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
 client.on(Events.Error, (error) => console.error('Discord client error:', error));
 process.on('unhandledRejection', (error) => console.error('Unhandled promise rejection:', error));
 
-client.login(TOKEN).catch((error) => {
-  console.error('Login failed. Check DISCORD_TOKEN:', error.message || error);
-  process.exit(1);
-});
+// Start the full dashboard independently of the Discord gateway. This keeps
+// Bot Control available so Discord can be turned back on after being stopped.
+startDashboard(
+  client,
+  playTrackFromDashboard,
+  playSavedTrackFromDashboard,
+  getDashboardMusicStatus,
+  controlDashboardMusic,
+  async (member) => sendWelcomeMessage(member, getDashboardSettings(member.guild.id).welcome),
+  getRuntimeMonitoring,
+  () => client.isReady(),
+  async (enabled) => {
+    const current = readRuntimeControl();
+    if (enabled) {
+      if (!client.isReady()) await client.login(TOKEN);
+    } else if (client.isReady()) {
+      await client.destroy();
+    }
+    writeRuntimeControl({ discordEnabled: enabled, mcordEnabled: current.mcordEnabled });
+  },
+);
+if (readRuntimeControl().discordEnabled) {
+  client.login(TOKEN).catch(error => console.error('Login failed. Check DISCORD_TOKEN:', error.message || error));
+} else {
+  console.log('[Discord] Bot starts disabled by dashboard runtime control.');
+}
