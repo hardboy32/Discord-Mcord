@@ -1,0 +1,19 @@
+{
+  "name": "discord-mcord-combined",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Combined Railway deployment for the Discord bot and Mcord bot",
+  "main": "combined.js",
+  "scripts": {
+    "start": "node combined.js",
+    "check": "node --check combined.js && node --check start.js && node --check index.js && node --check dashboard.js && node --check modules.js && node --check community.js"
+  },
+  "engines": {
+    "node": ">=22.12.0 <23"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "dotenv": "^17.2.3",
+    "shoukaku": "4.3.0"
+  }
+}

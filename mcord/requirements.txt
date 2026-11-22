@@ -1,0 +1,20 @@
+# Environment
+python-dotenv>=1.0,<2
+
+# Discord
+# The Mcord wheel does not reliably provide the discord.py import itself.
+discord.py>=2.6,<3
+
+# Mcord SDKs
+https://mcord.ir/downloads/sdk/mcord_discord-0.1.7-py3-none-any.whl
+https://mcord.ir/downloads/sdk/mcord_voice-0.1.2-py3-none-any.whl
+
+# Music search/download
+yt-dlp[default]>=2026.1.0
+
+# Discord voice support
+PyNaCl
+
+# Faster asyncio event loop on Linux hosts
+uvloop>=0.21,<1
+davey
