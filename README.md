@@ -12,7 +12,7 @@ Railway starts one container with `node combined.js`. The supervisor launches tw
 1. `node start.js` — starts YouTube Cipher, Lavalink and the original Discord bot.
 2. `/opt/venv/bin/python mcord/run.py` — starts only the Mcord bot.
 
-The Python process intentionally receives `MCORD_BOT_TOKEN` only. Do not set its optional `DISCORD_TOKEN`: the Node.js application already owns the Discord gateway connection. This avoids logging in twice with the same Discord token.
+The Python source can also start a Discord music bot when it receives `DISCORD_TOKEN`. The supervisor deliberately removes that variable from the Python process environment, so the Node.js application is the only process that logs into Discord. The Python process receives `MCORD_BOT_TOKEN` and connects to Mcord.
 
 If one stack exits unexpectedly, the supervisor retries that stack with a backoff without intentionally stopping the other. Use one Railway replica to avoid duplicate bot sessions.
 
