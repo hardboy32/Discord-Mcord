@@ -3,6 +3,7 @@
 require('dotenv').config({ quiet: true });
 
 const { spawn } = require('node:child_process');
+const { readRuntimeControl } = require('./runtime-control');
 const crypto = require('node:crypto');
 
 const required = ['DISCORD_TOKEN', 'MCORD_BOT_TOKEN'];
@@ -113,7 +114,57 @@ launch('Discord + Lavalink', 'node', ['start.js'], process.env);
 
 // The Python source project can also start a discord.py music bot if it sees
 // DISCORD_TOKEN. Keep that token exclusively in the Node.js Discord process.
-launch('Mcord', '/opt/venv/bin/python', ['mcord/run.py'], {
-  ...process.env,
-  DISCORD_TOKEN: '',
-});
+const mcordEnv = { ...process.env, DISCORD_TOKEN: '' };
+let mcordEnabled = readRuntimeControl().mcordEnabled;
+const mcordState = { child: null, restartTimer: null, stableTimer: null, delay: 3000 };
+children.set('Mcord', mcordState);
+function startMcord() {
+  if (shuttingDown || !mcordEnabled || mcordState.child) return;
+  console.log('[Combined] Starting Mcord.');
+  const child = spawn('/opt/venv/bin/python', ['mcord/run.py'], { cwd: '/app', env: mcordEnv, stdio: 'inherit' });
+  mcordState.child = child;
+  child.once('error', error => {
+    console.error('[Combined] Could not launch Mcord:', error.message || error);
+    mcordState.child = null;
+    scheduleMcordRestart(error.message || 'spawn error');
+  });
+  child.once('spawn', () => {
+    mcordState.stableTimer = setTimeout(() => { mcordState.delay = 3000; mcordState.stableTimer = null; }, 30000);
+  });
+  child.once('exit', (code, signal) => {
+    if (mcordState.stableTimer) clearTimeout(mcordState.stableTimer);
+    mcordState.stableTimer = null;
+    mcordState.child = null;
+    if (!shuttingDown && mcordEnabled) scheduleMcordRestart('exit code ' + code + ', signal ' + signal);
+  });
+}
+function scheduleMcordRestart(reason) {
+  if (shuttingDown || !mcordEnabled || mcordState.restartTimer) return;
+  console.error('[Combined] Mcord stopped (' + reason + '). Restarting in ' + Math.round(mcordState.delay / 1000) + 's.');
+  const wait = mcordState.delay;
+  mcordState.delay = Math.min(mcordState.delay * 2, 60000);
+  mcordState.restartTimer = setTimeout(() => { mcordState.restartTimer = null; startMcord(); }, wait);
+}
+function stopMcord() {
+  if (mcordState.restartTimer) clearTimeout(mcordState.restartTimer);
+  mcordState.restartTimer = null;
+  if (mcordState.stableTimer) clearTimeout(mcordState.stableTimer);
+  mcordState.stableTimer = null;
+  const child = mcordState.child;
+  if (child && child.exitCode === null) {
+    console.log('[Combined] Stopping Mcord on dashboard request.');
+    try { child.kill('SIGTERM'); } catch (_) {}
+    const forceTimer = setTimeout(() => { if (child.exitCode === null) try { child.kill('SIGKILL'); } catch (_) {} }, 10000);
+    if (typeof forceTimer.unref === 'function') forceTimer.unref();
+  }
+}
+function reconcileMcord() {
+  const desired = readRuntimeControl().mcordEnabled;
+  if (desired === mcordEnabled) return;
+  mcordEnabled = desired;
+  if (mcordEnabled) { console.log('[Combined] Mcord enabled from dashboard.'); startMcord(); }
+  else stopMcord();
+}
+const controlPoll = setInterval(reconcileMcord, 1500);
+if (typeof controlPoll.unref === 'function') controlPoll.unref();
+if (mcordEnabled) startMcord();
